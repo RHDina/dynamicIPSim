@@ -10,6 +10,12 @@ from random import randint, uniform, choice
 from operator import add
 from stochastic.processes.continuous import BrownianMotion, FractionalBrownianMotion
 
+import sys
+sys.path.insert(0, 'C:/Users/Dina Ratsimandresy/Documents/GitHub/PSFToolbox-Python')
+# from math_tools import create_grid
+
+import pandas
+
 
 def simulate_2d_randomwalk(nsteps=10000, stepsize=1):
     """
@@ -66,7 +72,7 @@ def simulate_2d_fbm(m, nsteps, hurst=0.5, dt=1):
 
     return x0, y0
 
-def compute_xy_pos(n, m, sxy, dt=0.01, method='Brownian', edgeex=0.1, drift=1, scale=1, hurst=0.5):
+def compute_xy_pos(n, m, sxy, dt=0.01, method='Brownian', edgeex=0.1, drift=1, scale=1, hurst=0.5,rand_pos_particle_x=None,rand_pos_particle_y=None):
     """
     Function computes random spatial position given the input arguments
     Input :
@@ -88,8 +94,10 @@ def compute_xy_pos(n, m, sxy, dt=0.01, method='Brownian', edgeex=0.1, drift=1, s
     """
 
      # random position in x and y of the particles, excluding 10% position at the edge
-    rand_pos_particle_x = [randint(np.ceil(sxy[0]*edgeex), np.floor(sxy[0]*(1-edgeex))) for p in range(m)]
-    rand_pos_particle_y = [randint(np.ceil(sxy[1]*edgeex), np.floor(sxy[1]*(1-edgeex))) for p in range(m)]
+    if rand_pos_particle_x==None:
+        rand_pos_particle_x = [randint(np.ceil(sxy[0]*edgeex), np.floor(sxy[0]*(1-edgeex))) for p in range(m)]
+    if rand_pos_particle_y==None:
+        rand_pos_particle_y = [randint(np.ceil(sxy[1]*edgeex), np.floor(sxy[1]*(1-edgeex))) for p in range(m)]
 
     match method:
         case 'Brownian':
@@ -113,8 +121,43 @@ def compute_xy_pos(n, m, sxy, dt=0.01, method='Brownian', edgeex=0.1, drift=1, s
 
     return x0, y0
 
+def compute_beads_params(m,particle_size_range = [1.5,5],bead_circularity=1,x0=None,y0=None):
+    """
+    Compute the parameters of the bead at the first time point 
+    --------
+    Input: 
+    m: int 
+        number of beads
+    particle_size_range: list of two floats
+        range of the particle size. First entry: lower bound. Second entry: upper bound. 
+    bead_circularity: 1 or 0
+        command to compute a circular bead (1) or non-circular bead (0). this affects the values of sigma_x and sigma_y
+    x0: list or 1D array of length equal to m
+        x-position of the beads at t=0s before the motion of the beads takes off
+    y0: list or 1D array of length equal to m
+        y-position of the beads at t=0s before the motion of the beads takes off
+    --------
+    Output: 
+    A dataframe with 5 columns
+    amp: amplitude of the bead intensity
+    sigma_x: Gaussian width along x
+    sigma_y: Gaussian width along y
+    mu_x: x-position at t = 0s
+    mu_y: y-position at t = 0s
+    """
 
-def sigma_xy(m, particle_size_range = [1.5,5]):
+    sigma_x, sigma_y = sigma_xy(m, particle_size_range,bead_circularity) 
+    amp = generate_amp(m, sigma_x, 5)
+    bead_params = pandas.DataFrame({'amp':amp,'sigma_x':sigma_x,'sigma_y':sigma_y})
+    if x0.all() != None:
+        bead_params['x0_init'] = x0
+    if y0.all() != None:
+        bead_params['y0_init'] = y0
+
+    return bead_params
+
+
+def sigma_xy(m, particle_size_range = [1.5,5],bead_circularity=1):
     """
     Generate random values of the sigma for the Gaussian distribution for each particle. The sigma size is delimited by the particle size. 
 
@@ -129,21 +172,24 @@ def sigma_xy(m, particle_size_range = [1.5,5]):
     """
     sigma = [particle_size_range[p]/(2*np.sqrt(2*np.log(2))) for p in range(2)]
     sigma_x = [uniform(sigma[0],sigma[1]) for p in range(m)]
-    sigma_y = sigma_x #[uniform(1.5,5) for p in range(m)] # we firstly assume a circular particle
+    if bead_circularity==1:
+        sigma_y = sigma_x 
+    else:
+        sigma_y = [uniform(sigma[0],sigma[1]) for p in range(m)] # we firstly assume a circular particle
     return sigma_x, sigma_y
 
 def generate_amp(m, sigma_x, factor=5):
     """
     Generate a range of peak intensity using the width of the particles. Lower peak value is attributed to smaller width.
     Input :
-    m : 
-    sigma_x : 
+    m : int, number of particles
+    sigma_x : width of the particles
 
     """
     amp = [sigma_x[p]*factor for p in range(m)]
     return amp
 
-def decay_image(myimage, gamma=0.9, dt=0.001):
+def decay_image(myimage, gamma=0.0009):
     """
     Add decay in the image through time
     I(t) = I(0)exp(-gamma*t)
@@ -152,16 +198,16 @@ def decay_image(myimage, gamma=0.9, dt=0.001):
     gamma : float between 0 and 1, decay factor
     dt : time step
     Output:
-    bleached_ima 
+    bleached_image
     """
     myimage = np.asarray(myimage)
     sz = myimage.shape
-    d = np.expand_dims(np.asarray([np.exp(-gamma*t*dt) for t in range(sz[2])]), axis=(1,2)) # decay factor
+    d = np.expand_dims(np.asarray([np.exp(-gamma*t) for t in range(sz[2])]), axis=(1,2)) # decay factor
     d = np.transpose(d,(2,1,0))
     myimage_decay = myimage*d
     return myimage_decay
 
-def generate_images(x0, y0, sxy, particle_size_range = [1.5,5], gamma=0.9, dt=0.001, N=1000):
+def generate_images(x0, y0, sxy, bead_params_all, gamma=0.0009, N=1000):
     """
     Use the brownian function defined in the function brownian to generate 2D Brownian motion, 
 
@@ -176,14 +222,14 @@ def generate_images(x0, y0, sxy, particle_size_range = [1.5,5], gamma=0.9, dt=0.
         The number of step distance to take.
     sxy : list of two integers
         grid size in x and y directions on which the images of the particles to be placed on.
-    particle_size_range : list of two floats
-        Range of the particle size in pixel, this defines the FWHM of the resulting Gaussian distribution. 
-    edgeex : float between 0 and 1
-        Percentage of the grid where we avoid to have particle positionned in the first time position.
-    dt : float
-        The time step.
+    bead_params_all: pandas dataframe of 3 or 5 columns
+        ['amp']: first column, amplitude
+        ['sigma_x']: width of the bead along x
+        ['sigma_y']: width of the bead along y
+        ['mu_x']: center position along the x-axis [optional, not necessarily required for the computation here]
+        ['mu_y']: center position along the y-axis [optional, not necessarily required for the computation here]
     gamma : float between 0 and 1
-        Decaying factor when the photobleaching in the data during the acquisition time is considered.
+        Decaying factor when the photobleaching in the data during the acquisition time is considered, 0 yields to no bleaching.
     N : int
         maximal number of photons.
 
@@ -191,24 +237,23 @@ def generate_images(x0, y0, sxy, particle_size_range = [1.5,5], gamma=0.9, dt=0.
     -------
     noisyimg : 3D array of size sxy[0] x sxy[1] x n
         Similuted 3D image containing the motion of the m particles, a Poisson noise is added at the end of the simulation.
-    x0, y0 : 
 
     """
 
     m,n = x0.shape # m: number of particles, n: number of time points
     
-    sigma_x, sigma_y = sigma_xy(m, particle_size_range)
+    sigma_x = bead_params_all['sigma_x']
+    sigma_y = bead_params_all['sigma_y']
 
     # amplitude // bigger particle has higher peak intensity
-    amp = generate_amp(m, sigma_x, factor=10)
-
+    amp = bead_params_all['amp']
 
     destgrid = np.zeros((sxy[0],sxy[1],n)) 
     xx, yy = create_grid(sxy)
 
     grid_first = np.zeros((sxy[0],sxy[1]))
 
-    for nk in range(n):
+    for nk in range(n): #
         grid_k = grid_first+0
 
         for mk in range(m):
@@ -216,13 +261,13 @@ def generate_images(x0, y0, sxy, particle_size_range = [1.5,5], gamma=0.9, dt=0.
             grid_k = grid_k + gauss2D(xx,yy,[x0[mk,nk],y0[mk,nk]],[sigma_x[mk],sigma_y[mk]],amp[mk])
         destgrid[:,:,nk] = grid_k
     # decay in the intensity over time due to photobleaching
-    decayed = decay_image(destgrid,gamma,dt)
+    decayed = decay_image(destgrid,gamma)
     # maximum number of photons acquired in the image
     decayed = decayed*N/np.max(decayed)  
     # add Poisson noise
     noisyimg = np.random.poisson(decayed)
 
-    return noisyimg, x0, y0, sigma_x, sigma_y, amp
+    return noisyimg
 
 def create_grid(sxy):
     """
@@ -236,7 +281,7 @@ def create_grid(sxy):
     To add: if the input sxy is only one integer but not a list
     """
     xx, yy = np.meshgrid(np.linspace(0,sxy[0]-1,sxy[0]),np.linspace(0,sxy[1]-1,sxy[1]))
-    return xx, yy#np.stack((xx.flatten(), yy.flatten()))
+    return xx, yy
 
 def gauss2D(xx,yy, mu_xy, sigma_xy, amp):
     """
@@ -258,4 +303,5 @@ def gauss2D(xx,yy, mu_xy, sigma_xy, amp):
     """
     c = 1/(2*np.pi*sigma_xy[0]*sigma_xy[1]) # constant
     return amp*c*np.exp(-((xx-mu_xy[0])**2/(2*(sigma_xy[0])**2)  + (yy-mu_xy[1])**2/(2*(sigma_xy[1])**2)))
+
 
